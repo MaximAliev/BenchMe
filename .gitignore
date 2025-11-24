@@ -21,3 +21,4 @@ cloud.yaml
 requirements.txt
 benchmark/main.py
 bench.sh
+examples/local_data.py

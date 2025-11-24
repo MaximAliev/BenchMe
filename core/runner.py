@@ -14,63 +14,65 @@ import numpy as np
 import pandas as pd
 from sklearn.exceptions import NotFittedError
 
-from core.automl import Imbaml, AutoGluon, FLAML
+from core.automl import AutoML, Imbaml, AutoGluon
 from core.domain import TabularDataset, MLTask
 from core.preprocessing import TabularDatasetPreprocessor
-from benchmark.repository import FittedModel, ZenodoRepository, TabularDatasetRepository
-from utils.decorators import Decorators
-
-logger = logging.getLogger(__name__)
+from benchmark.repository import FittedModel, OpenMLRepository, ZenodoRepository
+from loguru import logger
 
 
-class AutoMLRunner(ABC):
+# TODO: support presets and leaderboard.
+class AutoMLHub:
     def __init__(
         self,
-        automl,
-        metric,
-        log_to_file,
+        automl = 'ag',
+        metric: Union[str, List[str]] = 'f1',
+        repository = 'zenodo',
+        log_to_file = True,
         *args,
         **kwargs
     ):
-        def _validate_metrics(metric: str):
+        # TODO: use setters.
+        def __validate_metrics(metric: str):
             if metric not in ['f1', 'bal_acc', 'ap']:
                 raise ValueError(
                     f"""
                     Invalid value of metric parameter: {metric}.
-                    Available options: ['f1', 'bal_acc', 'ap'].
+                    Options available: ['f1', 'bal_acc', 'ap'].
                     """)
         if isinstance(metric, list):
             for m in metric:
-                _validate_metrics(m)
+                __validate_metrics(m)
             self._metrics = metric
         else:
-            _validate_metrics(metric)
+            __validate_metrics(metric)
             self._metrics = [metric]
 
         if automl == 'ag':
             self._automl = AutoGluon(*args, **kwargs)
-        elif automl == 'flaml':
-            self._automl = FLAML()
         elif automl == 'imbaml':
             self._automl = Imbaml(*args, **kwargs)
         else:
             raise ValueError(
                 f"""
                 Invalid value of automl parameter: {automl}.
-                Options available: ['ag', 'flaml', 'imbaml'].
+                Options available: ['ag', 'imbaml'].
                 """)
         
         self._fitted_model: Optional[FittedModel]
         self._log_to_file = log_to_file
+        
+        self.repository = repository
 
-    @abstractmethod
+        self._configure_environment()
+
+    @logger.catch
     def run(self) -> None:
-        raise NotImplementedError()
+        for dataset in self._repository.datasets:
+            self._run_on_dataset(dataset)
 
     def _configure_environment(self) -> None:
-        logging_handlers = [
-            logging.StreamHandler(stream=sys.stdout),
-        ]
+        logging_handlers = []
 
         if self._log_to_file:
             log_filepath = 'logs/'
@@ -79,11 +81,8 @@ class AutoMLRunner(ABC):
             log_filepath += '.log'
             logging_handlers.append(logging.FileHandler(filename=log_filepath, encoding='utf-8', mode='w'))
 
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(levelname)s - %(message)s',
-            handlers=logging_handlers
-        )
+        for h in logging_handlers:
+            logger.add(h, colorize=True, format='{level} {message}', level='INFO')
 
         logger.info(f"Optimization metrics are {self._metrics}.")
 
@@ -106,7 +105,6 @@ class AutoMLRunner(ABC):
 
         logger.info(f"{dataset.id}...Loaded dataset name: {dataset.name}.")
         logger.debug(f'Rows: {X_train.shape[0]}. Columns: {X_train.shape[1]}')
-
         
         class_belongings = Counter(y_train)
         logger.info(class_belongings)
@@ -147,57 +145,25 @@ class AutoMLRunner(ABC):
             time_passed = time.time() - start_time
             
             logger.info(f"Training successfully finished.")
-            logger.info(f"Training time is {time_passed // 60} min.")
+            logger.info(f"Training took {time_passed // 60} min.")
 
             y_predicted = self._automl.predict(X_test)
             self._automl.score(metric, y_test, y_predicted, positive_class_label)
-
-# TODO: support presets and leaderboard.
-class AutoMLSingleRunner(AutoMLRunner):
-    def __init__(
-        self,
-        dataset: TabularDataset,
-        automl = 'ag',
-        metric: Union[str, List[str]] = 'f1',
-        log_to_file = False,
-        *args,
-        **kwargs
-    ):
-        super().__init__(automl, metric, log_to_file, *args, **kwargs)
-        self._dataset = dataset
-
-        self._configure_environment()
-
-    @Decorators.log_exception
-    def run(self) -> None:
-        self._run_on_dataset(self._dataset)
-
-
-class AutoMLBenchmarkRunner(AutoMLRunner):
-    def __init__(
-        self,
-        automl = 'ag',
-        metric: Union[str, List[str]] = 'f1',
-        log_to_file = True,
-        repository: TabularDatasetRepository = ZenodoRepository(),
-        *args,
-        **kwargs
-    ):
-        super().__init__(automl, metric, log_to_file, *args, **kwargs)
-        self._repository = repository
-
-        self._configure_environment()
-
+    
     @property
     def repository(self):
         return self._repository
     
     @repository.setter
     def repository(self, value):
-        self._repository = value
-
-    @Decorators.log_exception
-    def run(self) -> None:
-        for dataset in self._repository.datasets:
-            self._run_on_dataset(dataset)
-
+        if value == 'zenodo':
+            self._repository = ZenodoRepository()
+        elif value == 'openml':
+            self._repository = OpenMLRepository()
+        else:
+            raise ValueError(
+                f"""
+                Invalid value of repository parameter:{value}.
+                Options available: ['openml', 'zenodo'].
+                """
+            )

@@ -6,8 +6,7 @@ import pandas as pd
 from imblearn.datasets import make_imbalance
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split as tts
-
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 
 class TabularDatasetPreprocessor:

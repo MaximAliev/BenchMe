@@ -6,24 +6,25 @@ from abc import ABC, abstractmethod
 from io import StringIO
 from typing import Optional, Union, final, List, Dict
 import autogluon.tabular
-import flaml.automl.automl
 import numpy as np
 import pandas as pd
 import ray
 from sklearn.exceptions import NotFittedError
 from sklearn.metrics import fbeta_score, balanced_accuracy_score, recall_score, precision_score, average_precision_score
 from imbaml.main import ImbamlOptimizer
-from utils.decorators import Decorators
 from autogluon.tabular import TabularDataset as AutoGluonTabularDataset, TabularPredictor as AutoGluonTabularPredictor
 from autogluon.core.metrics import make_scorer
-from flaml import AutoML as FLAMLPredictor
+from loguru import logger
 
 from core.domain import TabularDataset, MLTask
 
-logger = logging.getLogger(__name__)
-
 
 class AutoML(ABC):
+    def __init__(self, verbosity=1):
+        if verbosity > 2:
+            raise ValueError()
+        self._verbosity = verbosity
+    
     @abstractmethod
     def fit(
         self,
@@ -53,7 +54,7 @@ class AutoML(ABC):
             'pos_label': pos_label
         }
 
-        # TODO: add handling for 'all' as a value of metrics to avoid hard-coding all metric names.
+        # TODO: add handling for 'all'.
         if isinstance(metrics, str):
             self._calculate_metric_score(
                 metrics,
@@ -87,13 +88,13 @@ class AutoML(ABC):
 
         if metric == 'f1':
             f1 = fbeta_score(y_test, y_pred, beta=1, pos_label=pos_label)
-            logger.info(f"F1: {f1:.3f}")
+            logger.info(f"F1 score: {f1:.3f}")
         elif metric == 'balanced_accuracy':
             balanced_accuracy = balanced_accuracy_score(y_test, y_pred)
-            logger.info(f"Balanced accuracy: {balanced_accuracy:.3f}")
+            logger.info(f"Balanced accuracy score: {balanced_accuracy:.3f}")
         elif metric == 'average_precision':
             average_precision = average_precision_score(y_test, y_pred, pos_label=pos_label)
-            logger.info(f"Average precision: {average_precision:.3f}")
+            logger.info(f"Average precision score: {average_precision:.3f}")
 
     def __str__(self):
         return self.__class__.__name__
@@ -103,10 +104,11 @@ class Imbaml(AutoML):
     def __init__(
         self,
         sanity_check=False,
-        verbosity=0,
-        leaderboard=False
+        leaderboard=False,
+        *args,
+        **kwargs
     ):
-        self._verbosity = verbosity
+        super().__init__(*args, **kwargs)
         self._fitted_model= None
         if sanity_check:
             self._n_evals = 6
@@ -182,9 +184,14 @@ class Imbaml(AutoML):
 
 
 class AutoGluon(AutoML):
-    def __init__(self, preset='medium_quality', verbosity=0):
+    def __init__(
+        self,
+        preset='medium',
+        *args,
+        **kwargs
+    ):
+        super().__init__(*args, **kwargs)
         self._preset = preset
-        self._verbosity = verbosity
         self._fitted_model: Optional[AutoGluonTabularPredictor] = None
 
     @property
@@ -193,21 +200,21 @@ class AutoGluon(AutoML):
 
     @preset.setter
     def preset(self, preset):
-        if preset not in ['medium_quality', 'good_quality', 'high_quality', 'best_quality', 'extreme_quality']:
+        if preset not in ['medium', 'good', 'high', 'best', 'extreme']:
             raise ValueError(
                 f"""
-                Invalid preset value: {preset}.
+                Invalid value of preset parameter: {preset}.
                 Options available: [
-                    'medium_quality',
-                    'good_quality',
-                    'high_quality',
-                    'best_quality',
-                    'extreme_quality'
+                    'medium',
+                    'good',
+                    'high',
+                    'best',
+                    'extreme'
                 ].
                 """)
         self._preset = preset
 
-    @Decorators.log_exception
+    @logger.catch
     def predict(self, X_test: Union[pd.Series, np.ndarray]) -> Union[pd.Series, np.ndarray]:
         if self._fitted_model is None:
             raise NotFittedError()
@@ -216,7 +223,7 @@ class AutoGluon(AutoML):
 
         return predictions
 
-    @Decorators.log_exception
+    @logger.catch
     def fit(
         self,
         task: MLTask,
@@ -224,24 +231,25 @@ class AutoGluon(AutoML):
         dataset = task.dataset
         metric = task.metric
         y_label = dataset.y_label
-        if y_label is None:         
-            y_label = "Target"
-
+        
         if metric not in ['f1', 'balanced_accuracy', 'average_precision']:
             raise ValueError(f"Metric {metric} is not supported currently.")
         
         if isinstance(dataset.X, np.ndarray):
             Xy = pd.DataFrame(data=np.column_stack([dataset.X, dataset.y]))
+            y_label = Xy.columns[-1]
         elif isinstance(dataset.X, pd.DataFrame):
+            if y_label is None:         
+                y_label = "Target"
+
             Xy = pd.DataFrame(
                 data=np.column_stack([dataset.X, dataset.y]),
-                columns=[*dataset.X.columns, dataset.y_label])
+                columns=[*dataset.X.columns, y_label])
         else:
             raise TypeError()
 
-
         ag_dataset = AutoGluonTabularDataset(Xy)
-        # logger.info(f"AG dataset,", ag_dataset)
+
         predictor = AutoGluonTabularPredictor(
             problem_type='binary',
             label=y_label,
@@ -251,44 +259,13 @@ class AutoGluon(AutoML):
 
         val_scores = predictor.leaderboard().get('score_val')
         if val_scores is None or len(val_scores) == 0:
-            logger.error("No best model found.")
+            logger.error("No model found.")
             return
 
-        best_model_name = predictor.model_best
+        best_model = predictor.model_best
 
-        val_losses = {best_model_name: np.float64(val_scores.max())}
-        self._log_val_loss_alongside_fitted_model(val_losses)
+        logger.info(f"Best model found: {best_model}")
 
-        predictor.delete_models(models_to_keep=best_model_name, dry_run=False)
+        predictor.delete_models(models_to_keep=best_model, dry_run=False)
 
         self._fitted_model = predictor
-
-
-class FLAML(AutoML):
-    def __init__(self):
-        self._fitted_model: Optional[FLAMLPredictor] = None
-
-    def fit(
-        self,
-        task: MLTask,
-    ) -> None:
-        dataset = task.dataset
-        metric = task.metric
-
-        metric_name = None
-        if metric == 'average_precision':
-            metric_name = 'ap'
-        elif metric == 'f1':
-            metric_name = 'f1'
-        elif metric in ['balanced_accuracy', 'precision', 'recall']:
-            raise ValueError(f"Metric {metric} is not supported.")
-
-        automl = FLAMLPredictor()
-        automl.fit(dataset.X, dataset.y, metric=metric_name)
-
-        best_loss = automl.best_loss
-        best_model = automl.best_estimator
-
-        self._log_val_loss_alongside_fitted_model({best_model: np.float64(best_loss)})
-
-        self._fitted_model = automl
