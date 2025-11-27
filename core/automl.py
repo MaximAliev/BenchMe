@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import ray
 from sklearn.exceptions import NotFittedError
-from sklearn.metrics import fbeta_score, balanced_accuracy_score, recall_score, precision_score, average_precision_score
+from sklearn.metrics import fbeta_score, balanced_accuracy_score, matthews_corrcoef, recall_score, precision_score, average_precision_score, roc_auc_score, accuracy_score
 from imbaml.main import ImbamlOptimizer
 from autogluon.tabular import TabularDataset as AutoGluonTabularDataset, TabularPredictor as AutoGluonTabularPredictor
 from autogluon.core.metrics import make_scorer
@@ -81,19 +81,42 @@ class AutoML(ABC):
         pos_label = kwargs.get("pos_label")
 
         if metric == 'f1':
-            f1 = fbeta_score(y_test, y_pred, beta=1, pos_label=pos_label)
-            logger.info(f"F1 score: {f1:.3f}.")
+            score = fbeta_score(y_test, y_pred, beta=1, pos_label=pos_label)
+            logger.info(f"F1 score: {score:.3f}.")
+        elif metric == 'precision':
+            score = precision_score(y_test, y_pred, pos_label=pos_label)
+            logger.info(f"Precision score: {score:.3f}.")
+        elif metric == 'recall':
+            score = recall_score(y_test, y_pred, pos_label=pos_label)
+            logger.info(f"Recall score: {score:.3f}.")
+        elif metric == 'roc_auc':
+            score = roc_auc_score(y_test, y_pred)
+            logger.info(f"ROC AUC score: {score:.3f}.")
         elif metric == 'balanced_accuracy':
-            balanced_accuracy = balanced_accuracy_score(y_test, y_pred)
-            logger.info(f"Balanced accuracy score: {balanced_accuracy:.3f}.")
+            score = balanced_accuracy_score(y_test, y_pred)
+            logger.info(f"Balanced accuracy score: {score:.3f}.")
         elif metric == 'average_precision':
-            average_precision = average_precision_score(y_test, y_pred, pos_label=pos_label)
-            logger.info(f"Average precision score: {average_precision:.3f}.")
+            score = average_precision_score(y_test, y_pred, pos_label=pos_label)
+            logger.info(f"Average precision score: {score:.3f}.")
+        elif metric == 'mcc':
+            score = matthews_corrcoef(y_test, y_pred)
+            logger.info(f"MCC score: {score:.3f}.")
+        elif metric == 'accuracy':
+            score = accuracy_score(y_test, y_pred)
+            logger.info(f"Balanced accuracy score: {score:.3f}.")
         else:
             raise ValueError(
                 f"""
                 Invalid value encountered among values of test_metrics parameter:{metric}.
-                Metrics available: ['f1', 'average_precision', 'balanced_accuracy'].        
+                Metrics available: [
+                'f1',
+                'precision',
+                'recall',
+                'roc_auc',
+                'average_precision',
+                'balanced_accuracy',
+                'mcc',
+                'accuracy'].        
                 """)
 
     def __str__(self):
@@ -232,8 +255,17 @@ class AutoGluon(AutoML):
         metric = task.metric
         y_label = dataset.y_label
         
-        if metric not in ['f1', 'balanced_accuracy', 'average_precision']:
-            raise ValueError(f"Metric {metric} is not supported currently.")
+        if metric not in [
+            'f1',
+            'precision',
+            'recall',
+            'roc_auc',
+            'average_precision',
+            'balanced_accuracy',
+            'mcc',
+            'accuracy'
+        ]:
+            raise ValueError(f"Metric {metric} is not supported by AutoGluon.")
         
         if isinstance(dataset.X, np.ndarray):
             Xy = pd.DataFrame(data=np.column_stack([dataset.X, dataset.y]))

@@ -125,7 +125,7 @@ class MLBench:
         metrics = {self.validation_metric}
         if self._test_metrics is not None:
             for metric in self._test_metrics:
-                metrics.append(metric)
+                metrics.add(metric)
         self._automl.score(metrics, y_test, y_predicted, positive_class_label)
 
     @property
@@ -152,12 +152,29 @@ class MLBench:
     
     @validation_metric.setter
     def validation_metric(self, value: str):
-        if value not in ['f1', 'bal_acc', 'ap']:
-                raise ValueError(
-                    f"""
-                    Invalid value of metric parameter: {value}.
-                    Options available: ['f1', 'bal_acc', 'ap'].
-                    """)
+        if value not in [
+            'f1',
+            'precision',
+            'recall',
+            'roc_auc',
+            'average_precision',
+            'balanced_accuracy',
+            'mcc',
+            'accuracy'
+        ]:
+            raise ValueError(
+                f"""
+                Invalid value of metric parameter: {value}.
+                Options available: [
+                    'f1',
+                    'precision',
+                    'recall',
+                    'roc_auc',
+                    'average_precision',
+                    'balanced_accuracy',
+                    'mcc',
+                    'accuracy'].
+                """)
         self._validation_metric = value
     
     @property
