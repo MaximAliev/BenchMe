@@ -2,22 +2,11 @@
 The aim of this project is to simplify benchmarking process in the field of automated machine learning.
 
 ### Project status
-The project under active development and new frameworks, tasks, metrics and repositories to be added soon.
+The project under active development and new frameworks, tasks, metrics and data repositories to be added soon.
 - Supported frameworks: 
     - [AutoGluon.Tabular](https://github.com/autogluon/autogluon).
-- Supported tasks: tabular classification. 
-- Supported metrics:
-    - F1.
-    - Precision.
-    - Recall.
-    - ROC AUC.
-    - Average precision.
-    - Balanced accuracy.
-    - MCC.
-    - Accuracy. 
-- Supported data repositories:
-    - [OpenML](https://www.openml.org/).
-    - Local filesystem.
+    - [H2O](https://github.com/h2oai/h2o-3).
+- Supported tasks: tabular binary classification. 
 
 ### Usage
 1. Clone the project.
@@ -28,4 +17,4 @@ The project under active development and new frameworks, tasks, metrics and repo
 ### Contribution
 Contribution is welcome! Feel free to open issues and submit pull requests.
 
-This is my personal project and it has no funding at all.
+This project is a part of my PhD study and it has no funding at all.

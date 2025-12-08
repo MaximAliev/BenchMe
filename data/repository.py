@@ -13,7 +13,6 @@ from imblearn.datasets import fetch_datasets
 from loguru import logger
 
 from data.domain import Dataset
-from utils.helpers import make_dataset
 
 
 class DatasetRepository(ABC):
@@ -33,37 +32,42 @@ class DatasetRepository(ABC):
         return self._datasets
 
 # REFACTOR THIS SHIT.
-class ZenodoRepository(DatasetRepository):
+class ImbalancedBinaryClassificationRepository(DatasetRepository):
     def __init__(self):
         super().__init__()
+
         self._raw_datasets = fetch_datasets(data_home='datasets/imbalanced', verbose=True)
 
     @logger.catch
     def load_dataset(self, id: int, X_and_y = True) -> Dataset:
         for i, (dataset_name, dataset_data) in enumerate(self._raw_datasets.items(), 1):
             if i == id:
-                X = dataset_data.get("data")
+                x = dataset_data.get("data")
                 y = dataset_data.get("target")[:, np.newaxis]
 
                 if not X_and_y:
-                    X = np.concatenate((X, y), axis=1)
+                    x = pd.DataFrame(np.concatenate((x, y), axis=1))
                     y = None
-                return make_dataset(
+                else:
+                    x = pd.DataFrame(x)
+                    y = pd.Series(y)
+                return Dataset(
                     name=dataset_name,
-                    X=X,
+                    x=x,
                     y=y
                 )
             elif i > id:
-                raise ValueError(f"TabularDataset(id={id}) is not available.")
+                raise ValueError(f"Id {id}) is out of range.")
 
-    def load_datasets(self, X_and_y = True, ids: Optional[List[int]] = None) -> List[Dataset]:
+    def load_datasets(self, ids: Optional[List[int]] = None, X_and_y = True) -> List[Dataset]:
         if ids is None:
             range_start = 1
             range_end = len(self._raw_datasets.keys()) + 1
             ids = range(range_start, range_end)
             logger.debug(f"Running tasks from {range_start} to {range_end}.")
-        for i in ids:
-            self._datasets.append(self.load_dataset(i, X_and_y))
+        for id in ids:
+            self._datasets.append(self.load_dataset(id, X_and_y))
+        
         return self.datasets
 
 
@@ -75,24 +79,31 @@ class OpenMLRepository(DatasetRepository):
         openml.config.set_root_cache_directory("datasets/openml")
 
     # TODO: parallelize.
-    def load_dataset(self, id: Optional[int] = None) -> Dataset:
+    def load_dataset(self, id: Optional[int] = None, X_and_y = True) -> Dataset:
         task = openml.tasks.get_task(id)
         dataset = task.get_dataset()
-        X, y, categorical_indicator, feature_names = dataset.get_data(
+        x, y, categorical_indicator, feature_names = dataset.get_data(
             target=dataset.default_target_attribute)
 
-        return make_dataset(
+        if not X_and_y:
+            x = pd.DataFrame(np.concatenate((x, y), axis=1))
+            y = None
+        else:
+            x = pd.DataFrame(x)
+            y = pd.Series(y, name=dataset.default_target_attribute, dtype="category")
+        
+        return Dataset(
             name=dataset.name,
-            y_label=dataset.default_target_attribute,
-            X=X,
+            x=x,
             y=y
         )
 
     @logger.catch
-    def load_datasets(self, id_range: List[int] = None) -> List[Dataset]:
+    def load_datasets(self, ids: Optional[List[int]] = None, X_and_y = True) -> List[Dataset]:
         benchmark_suite = openml.study.get_suite(suite_id=self._suite_id)
         for i, id in enumerate(benchmark_suite.tasks):
-            if id_range is not None and i not in id_range:
-                raise ValueError(f"TabularDataset(id={id}) is not available.")
+            if ids is not None and i not in ids:
+                raise ValueError(f"Id {id}) is out of range.")
             self._datasets.append(self.load_dataset(id))
+        
         return self.datasets

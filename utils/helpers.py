@@ -6,38 +6,6 @@ from loguru import logger
 from imblearn.datasets import make_imbalance
 from sklearn.model_selection import train_test_split as tts
 
-from data.domain import Task, Dataset
-
-
-dataset_id = itertools.count(start=1)
-task_id = itertools.count(start=1)
-
-
-def make_dataset(
-    name: str,
-    X: Union[pd.DataFrame, np.ndarray],
-    y: Union[pd.Series, np.ndarray],
-    y_label: Optional[str] = None,
-    size: Optional[int] = None
-) -> Dataset:
-    return Dataset(
-        id=next(dataset_id),
-        name=name,
-        X=X,
-        y=y,
-        y_label=y_label,
-        size=size
-    )
-
-def make_task(
-    dataset: Dataset,
-    metric: str
-) -> Task:
-    return Task(
-        id=next(task_id),
-        dataset=dataset,
-        metric=metric
-    )
 
 def make_imbalanced(
     self,
@@ -69,9 +37,9 @@ def make_imbalanced(
         return X_train, y_train
 
 def split_data_on_train_and_test(
-    X: Union[pd.DataFrame, np.ndarray],
-    y: Optional[Union[pd.Series, np.ndarray]] = None
-) -> List[Union[pd.DataFrame, pd.Series, np.ndarray]]:
+    X: pd.DataFrame,
+    y: Optional[pd.Series] = None
+) -> List[Union[pd.DataFrame, pd.Series]]:
         if y is not None:
             return tts(
                 X,

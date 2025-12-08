@@ -15,11 +15,10 @@ from sklearn.exceptions import NotFittedError
 from loguru import logger
 from sklearn.base import BaseEstimator
 
-from core.automl import AutoML, AutoGluon
+from core.automl import H2O, AutoML, AutoGluon
 from data.domain import Dataset, Task
-from data.preprocessing import CategoricalFeaturePreprocessor
-from data.repository import OpenMLRepository, DatasetRepository, ZenodoRepository
-from utils.helpers import make_task, split_data_on_train_and_test
+from data.repository import OpenMLRepository, DatasetRepository, ImbalancedBinaryClassificationRepository
+from utils.helpers import split_data_on_train_and_test
 
 
 # TODO: support presets and leaderboard.
@@ -28,7 +27,7 @@ class BAML:
         self,
         automl = 'ag',
         validation_metric = 'f1',
-        repository = 'zenodo',
+        repository = 'imbalanced_binary',
         log_to_file = True,
         test_metrics: Optional[List[str]] = None,
         *args,
@@ -48,14 +47,11 @@ class BAML:
 
     @logger.catch
     def run(self) -> None:
-        separate_on_X_and_y = True
-        if str(self.automl) == 'AutoGluon':
-            separate_on_X_and_y = False
-        self.repository.load_datasets(X_and_y=separate_on_X_and_y)
+        separate_on_x_and_y = False
+        self.repository.load_datasets(X_and_y=separate_on_x_and_y)
         
         for dataset in self.repository.datasets:
-            assert dataset is not None
-            self._run_on_dataset(dataset)
+            self._run_on_dataset(dataset, x_and_y=separate_on_x_and_y)
 
     def _configure_environment(self) -> None:
         # if self._log_to_file:
@@ -69,49 +65,52 @@ class BAML:
 
         logger.debug(f"Validation metric is {self.validation_metric}.")
 
-    @final
-    def _run_on_dataset(self, dataset: Dataset) -> None:
-        if isinstance(dataset.X, np.ndarray):
-            X = pd.DataFrame(data=dataset.X)
-        elif isinstance(dataset.X, pd.DataFrame):
-            X = dataset.X
+    def _run_on_dataset(self, dataset: Dataset, x_and_y = False) -> None:
+        if not x_and_y:
+            y_label = dataset.x.columns[-1]
+            y = dataset.x[y_label]
+            x = dataset.x.drop([y_label], axis=1)
         else:
-            raise TypeError(f"pd.DataFrame or np.ndarray was expected. Got: {type(dataset.X)}")
-        y_label = X.columns[-1]
+            x = dataset.x
+            y = dataset.y
+            y_label = y.name
+        x_train, x_test, y_train, y_test = split_data_on_train_and_test(x, y)
 
-        y = X[y_label]
-        X = X.drop([y_label], axis=1)
-        X_train, X_test, y_train, y_test = split_data_on_train_and_test(X, y)
-
-        logger.info(f"Dataset(id={dataset.id}, name={dataset.name}).")
-        logger.info(f'TRAINING Rows: {X_train.shape[0]}, Columns: {X_train.shape[1]}')
+        logger.info(f"Running a benchmark for the Dataset(name={dataset.name}).")
 
         class_belongings = Counter(y_train)
-        logger.info(f"Class belongings: {class_belongings.items()}")
         if len(class_belongings) > 2:
-            raise ValueError("Multiclass problems currently not supported.")
+            raise ValueError("Multiclass problems currently not supported =(.")
 
-        iterator_of_class_belongings = iter(sorted(class_belongings))
-        *_, positive_class_label = iterator_of_class_belongings
+        class_belongings_formatted = '; '.join(f"{k}: {v}" for k, v in class_belongings.items())
+        logger.debug(f"Class belongings: {{{class_belongings_formatted}}}")
+
+        class_belongings_iterator = iter(sorted(class_belongings))
+        *_, positive_class_label = class_belongings_iterator
         logger.debug(f"Inferred positive class label: {positive_class_label}.")
 
         number_of_positives = class_belongings.get(positive_class_label)
         if number_of_positives is None:
             raise ValueError("Unknown positive class label.")
 
-        training_dataset = Dataset(
-            id=dataset.id,
-            name=dataset.name,
-            X=X_train,
-            y=y_train,
-            y_label=y_label
-        )
+        if x_and_y:
+            training_dataset = Dataset(
+                name=dataset.name,
+                x=x_train,
+                y=y_train,
+            )
+        else:
+            df = pd.concat((x_train, y_train),axis=1)
+            training_dataset = Dataset(
+                name=dataset.name,
+                x=df
+            )
 
-        training_dataset_size = int(pd.DataFrame(X_train).memory_usage(deep=True).sum() / (1024 ** 2))
+        training_dataset_size = int(x_train.memory_usage(deep=True).sum() / (1024 ** 2))
         training_dataset.size = training_dataset_size
         logger.debug(f"Train sample size is approximately {training_dataset.size} mb.")
 
-        task  = make_task(
+        task  = Task(
             dataset=training_dataset,
             metric=self.validation_metric
         )
@@ -122,7 +121,7 @@ class BAML:
         time_passed = time.time() - start_time
         logger.info(f"Training took {time_passed // 60} min.")
 
-        y_predicted = self._automl.predict(X_test)
+        y_predicted = self._automl.predict(x_test)
 
         metrics = {self.validation_metric}
         if self._test_metrics is not None:
@@ -136,15 +135,15 @@ class BAML:
     
     @repository.setter
     def repository(self, value: str):
-        if value == 'zenodo':
-            self._repository = ZenodoRepository()
+        if value == 'imbalanced_binary':
+            self._repository = ImbalancedBinaryClassificationRepository()
         elif value == 'openml':
             self._repository = OpenMLRepository()
         else:
             raise ValueError(
                 f"""
                 Invalid value of repository parameter:{value}.
-                Options available: ['openml', 'zenodo'].
+                Options available: ['openml', 'imbalanced_binary'].
                 """
             )
     
@@ -187,9 +186,11 @@ class BAML:
     def automl(self, value: Tuple[str, Tuple[Any, ...], Dict[str, Any]]):
         if value[0] == 'ag':
             self._automl = AutoGluon(*value[1], **value[2])
+        elif value[0] == 'h2o':
+            self._automl = H2O(*value[1], **value[2])
         else:
             raise ValueError(
                 f"""
                 Invalid value of automl parameter: {value[0]}.
-                Options available: ['ag'].
+                Options available: ['ag', 'h2o'].
                 """)

@@ -18,7 +18,8 @@ dependencies = [
     "setuptools>=80.9.0",
     "torch>=2.2,<2.7",
     "tqdm==4.66.5",
-    "loguru",
+    "h2o>=3.46.0.9",
+    "loguru>=0.7.3",
 ]
 
 [global]

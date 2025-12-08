@@ -5,6 +5,8 @@ import re
 from abc import ABC, abstractmethod
 from io import StringIO
 from typing import Optional, Set, Union, final, List, Dict
+import h2o
+from h2o.automl import H2OAutoML
 import numpy as np
 import pandas as pd
 from sklearn.exceptions import NotFittedError
@@ -19,9 +21,8 @@ from data.domain import Dataset, Task
 
 class AutoML(ABC):
     def __init__(self, verbosity=1):
-        if verbosity > 2:
-            raise ValueError()
         self._verbosity = verbosity
+        self._fitted_model = None
     
     @abstractmethod
     def fit(
@@ -30,10 +31,10 @@ class AutoML(ABC):
     ) -> None:
         raise NotImplementedError()
 
-    def predict(self, X_test: Union[np.ndarray, pd.DataFrame]) -> Union[pd.DataFrame, np.ndarray]:
+    def predict(self, x_test: pd.DataFrame) -> Union[pd.Series, np.ndarray]:
         if self._fitted_model is None:
             raise NotFittedError()
-        predictions = self._fitted_model.predict(X_test)
+        predictions = self._fitted_model.predict(x_test)
         
         return predictions
 
@@ -41,8 +42,8 @@ class AutoML(ABC):
     def score(
         self,
         metrics: Set[str],
-        y_test: Union[pd.DataFrame, np.ndarray],
-        y_pred: Union[pd.DataFrame, np.ndarray],
+        y_test: pd.Series,
+        y_pred: pd.Series,
         pos_label: Optional[int] = None,
     ) -> None:
 
@@ -57,13 +58,14 @@ class AutoML(ABC):
                 metric,
                 **calculate_metric_score_kwargs)
 
+    # TERRIBLE METHOD.
     @final
     def _log_val_loss_alongside_fitted_model(self, losses: Dict[str, np.float64]) -> None:
         for m, l in losses.items():
             # TODO: different output for leaderboard.
             logger.info(f"Validation loss: {abs(l):.3f}")
 
-            model_log = pprint.pformat(f"ML model: {m}", compact=True)
+            model_log = pprint.pformat(f"Model: {m}", compact=True)
             logger.info(model_log)
 
     def _configure_environment(self, seed=42) -> None:
@@ -153,10 +155,10 @@ class AutoGluon(AutoML):
         self._preset = preset
 
     @logger.catch
-    def predict(self, X_test: Union[pd.Series, np.ndarray]) -> Union[pd.Series, np.ndarray]:
+    def predict(self, x_test: pd.DataFrame) -> Union[pd.Series, np.ndarray]:
         if self._fitted_model is None:
             raise NotFittedError()
-        dataset_test = AutoGluonTabularDataset(X_test)
+        dataset_test = AutoGluonTabularDataset(x_test)
         predictions = self._fitted_model.predict(dataset_test)
 
         return predictions
@@ -168,7 +170,6 @@ class AutoGluon(AutoML):
     ) -> None:
         dataset = task.dataset
         metric = task.metric
-        y_label = dataset.y_label
         
         if metric not in [
             'f1',
@@ -181,21 +182,12 @@ class AutoGluon(AutoML):
             'accuracy'
         ]:
             raise ValueError(f"Metric {metric} is not supported by AutoGluon.")
-        
-        if isinstance(dataset.X, np.ndarray):
-            dataframe = pd.DataFrame(data=np.column_stack([dataset.X, dataset.y]))
-        elif isinstance(dataset.X, pd.DataFrame):
-            dataframe = pd.DataFrame(
-                data=np.column_stack([dataset.X, dataset.y]),
-                columns=[*dataset.X.columns, y_label])
-        else:
-            raise TypeError()
 
-        ag_dataset = AutoGluonTabularDataset(dataframe)
+        ag_dataset = AutoGluonTabularDataset(dataset.x)
 
         predictor = AutoGluonTabularPredictor(
             problem_type='binary',
-            label=y_label,
+            label=dataset.x.columns[-1],
             eval_metric=metric,
             verbosity=self._verbosity
         ).fit(ag_dataset)
@@ -212,3 +204,51 @@ class AutoGluon(AutoML):
         predictor.delete_models(models_to_keep=best_model, dry_run=False)
 
         self._fitted_model = predictor
+
+class H2O(AutoML):
+    def __init__(
+        self,
+        *args,
+        **kwargs
+    ):
+        super().__init__(*args, **kwargs)
+        self._fitted_model = None
+        h2o.init()
+    
+    @logger.catch
+    def fit(
+        self,
+        task: Task,
+    ) -> None:
+        dataset = task.dataset
+        metric = task.metric
+        
+        if metric not in [
+            'f1',
+            'precision',
+            'recall',
+            'roc_auc',
+            'average_precision',
+            'balanced_accuracy',
+            'mcc',
+            'accuracy'
+        ]:
+            raise ValueError(f"Metric {metric} is not supported by H2O.")
+        
+        h2o_dataset = h2o.H2OFrame(dataset.x)
+
+        predictor = H2OAutoML(max_runtime_secs=20)
+        predictor.train(x=list(dataset.x.columns[:-1]), y=str(dataset.x.columns[-1]), training_frame=h2o_dataset)
+
+        self._fitted_model = predictor.leader
+    
+
+    @logger.catch
+    def predict(self, x_test: pd.DataFrame) -> Union[pd.Series, np.ndarray]:
+        if self._fitted_model is None:
+            raise NotFittedError()
+        dataset_test = h2o.H2OFrame(x_test)
+        predictions = self._fitted_model.predict(dataset_test).as_data_frame().iloc[:, 0].astype(int)
+        mapped_predictions = np.where(predictions == 0, -1, 1)
+
+        return mapped_predictions
