@@ -20,6 +20,8 @@ dependencies = [
     "tqdm==4.66.5",
     "h2o>=3.46.0.9",
     "loguru>=0.7.3",
+    "polars==1.36.1",
+    "pyarrow==22.0.0"
 ]
 
 [global]

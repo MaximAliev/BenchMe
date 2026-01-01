@@ -1,3 +1,4 @@
+from collections import Counter
 import itertools
 from typing import List, Optional, Tuple, Union
 import numpy as np
@@ -8,12 +9,11 @@ from sklearn.model_selection import train_test_split as tts
 
 
 def make_imbalanced(
-    self,
     X_train,
     y_train,
     class_belongings,
     pos_label
-) -> Tuple[Union[pd.DataFrame, np.ndarray], Union[pd.DataFrame, np.ndarray]]:
+) -> Tuple[Union[pd.DataFrame, pd.Series]]:
         is_dataset_initially_imbalanced = True
         number_of_positives = class_belongings.get(pos_label)
         proportion_of_positives = number_of_positives / len(y_train)
@@ -32,7 +32,7 @@ def make_imbalanced(
                 X_train,
                 y_train,
                 sampling_strategy=class_belongings)
-            logger.debug("Imbalancing applied.")
+            logger.info("Imbalancing applied.")
 
         return X_train, y_train
 
@@ -40,16 +40,34 @@ def split_data_on_train_and_test(
     X: pd.DataFrame,
     y: Optional[pd.Series] = None
 ) -> List[Union[pd.DataFrame, pd.Series]]:
-        if y is not None:
-            return tts(
-                X,
-                y,
-                random_state=42,
-                test_size=0.2,
-                stratify=y)
-        else:
-             return tts(
-                X,
-                y,
-                random_state=42,
-                test_size=0.2)
+    if y is not None:
+        return tts(
+            X,
+            y,
+            random_state=42,
+            test_size=0.2,
+            stratify=y)
+    else:
+        return tts(
+        X,
+        y,
+        random_state=42,
+        test_size=0.2)
+
+def infer_positive_class_label(y_train: Union[pd.Series, pd.DataFrame]) -> str:
+    class_belongings = Counter(y_train)
+    if len(class_belongings) > 2:
+        raise ValueError("Multiclass problems currently not supported =(.")
+
+    class_belongings_formatted = '; '.join(f"{k}: {v}" for k, v in class_belongings.items())
+    logger.debug(f"Class belongings: {{{class_belongings_formatted}}}")
+
+    class_belongings_iterator = iter(sorted(class_belongings))
+    *_, pos_label = class_belongings_iterator
+    logger.debug(f"Inferred positive class label: {pos_label}.")
+
+    number_of_positives = class_belongings.get(pos_label)
+    if number_of_positives is None:
+        raise ValueError("Unknown positive class label.")
+    
+    return pos_label

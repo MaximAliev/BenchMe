@@ -17,33 +17,33 @@ from sklearn.base import BaseEstimator
 
 from core.automl import H2O, AutoML, AutoGluon
 from data.domain import Dataset, Task
-from data.repository import OpenMLRepository, DatasetRepository, ImbalancedBinaryClassificationRepository
-from utils.helpers import split_data_on_train_and_test
+from data.repository import DatasetRepository, BinaryImbalancedDataRepository
+from utils.helpers import infer_positive_class_label, split_data_on_train_and_test
 
 
 # TODO: support presets and leaderboard.
 class BAML:
     def __init__(
         self,
+        repository = 'imbalanced_binary',
         automl = 'ag',
         validation_metric = 'f1',
-        repository = 'imbalanced_binary',
+        timeout = 3600,
         log_to_file = True,
         test_metrics: Optional[List[str]] = None,
         *args,
         **kwargs
     ):
-        self._validation_metric: str
         self._automl: AutoML
+        self._validation_metric: str
         self._fitted_model = None
 
-        self.validation_metric = validation_metric
-        self.automl = (automl, args, kwargs)
         self.repository = repository
+        self.automl = (automl, args, kwargs)
+        self.validation_metric = validation_metric
+        self._timeout = timeout
         self._log_to_file = log_to_file
         self._test_metrics = test_metrics
-
-        self._configure_environment()
 
     @logger.catch
     def run(self) -> None:
@@ -52,7 +52,7 @@ class BAML:
         for dataset in self.repository.datasets:
             self._run_on_dataset(dataset)
 
-    def _configure_environment(self) -> None:
+    # def _configure_environment(self) -> None:
         # if self._log_to_file:
         #     log_filepath = 'logs/'
         #     Path(log_filepath).mkdir(parents=True, exist_ok=True)
@@ -62,9 +62,9 @@ class BAML:
 
         # logger.add(sys.stdout, colorize=True, format='{level} {message}', level='INFO')
 
-        logger.debug(f"Validation metric is {self.validation_metric}.")
-
     def _run_on_dataset(self, dataset: Dataset, x_and_y = False) -> None:
+        logger.info(f"Running on the dataset: Dataset(name={dataset.name}).")
+
         if not x_and_y:
             y_label = dataset.x.columns[-1]
             y = dataset.x[y_label]
@@ -73,25 +73,11 @@ class BAML:
             x = dataset.x
             y = dataset.y
             y_label = y.name
+        
         x_train, x_test, y_train, y_test = split_data_on_train_and_test(x, y)
         y_train = y_train.astype(object)
-        
-        logger.info(f"Running a benchmark for the Dataset(name={dataset.name}).")
 
-        class_belongings = Counter(y_train)
-        if len(class_belongings) > 2:
-            raise ValueError("Multiclass problems currently not supported =(.")
-
-        class_belongings_formatted = '; '.join(f"{k}: {v}" for k, v in class_belongings.items())
-        logger.debug(f"Class belongings: {{{class_belongings_formatted}}}")
-
-        class_belongings_iterator = iter(sorted(class_belongings))
-        *_, positive_class_label = class_belongings_iterator
-        logger.debug(f"Inferred positive class label: {positive_class_label}.")
-
-        number_of_positives = class_belongings.get(positive_class_label)
-        if number_of_positives is None:
-            raise ValueError("Unknown positive class label.")
+        pos_class_label = infer_positive_class_label(y_train)
 
         if x_and_y:
             training_dataset = Dataset(
@@ -106,13 +92,13 @@ class BAML:
                 x=df
             )
 
-        training_dataset_size = int(x_train.memory_usage(deep=True).sum() / (1024 ** 2))
-        training_dataset.size = training_dataset_size
-        logger.debug(f"Train sample size is approximately {training_dataset.size} mb.")
+        training_dataset.size = int(x_train.memory_usage(deep=True).sum() / (1024 ** 2))
+        logger.debug(f"Train sample size < {training_dataset.size + 1}mb.")
 
         task  = Task(
             dataset=training_dataset,
-            metric=self.validation_metric
+            metric=self.validation_metric,
+            timeout=self._timeout
         )
 
         start_time = time.time()
@@ -127,7 +113,7 @@ class BAML:
         if self._test_metrics is not None:
             for metric in self._test_metrics:
                 metrics.add(metric)
-        self._automl.score(metrics, y_test, y_predicted, positive_class_label)
+        self._automl.score(metrics, y_test, y_predicted, pos_class_label)
 
     @property
     def repository(self) -> DatasetRepository:
@@ -135,15 +121,15 @@ class BAML:
     
     @repository.setter
     def repository(self, value: str):
-        if value == 'imbalanced_binary':
-            self._repository = ImbalancedBinaryClassificationRepository()
-        elif value == 'openml':
-            self._repository = OpenMLRepository()
+        if value == 'binary_imbalanced':
+            self._repository = BinaryImbalancedDataRepository()
+        # elif value == 'openml':
+        #     self._repository = OpenMLRepository()
         else:
             raise ValueError(
                 f"""
                 Invalid value of repository parameter:{value}.
-                Options available: ['openml', 'imbalanced_binary'].
+                Options available: ['binary_imbalanced'].
                 """
             )
     

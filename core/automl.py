@@ -45,7 +45,7 @@ class AutoML(ABC):
         metrics: Set[str],
         y_test: pd.Series,
         y_pred: pd.Series,
-        pos_label: Optional[int] = None,
+        pos_label: Optional[Union[int, str]] = None,
     ) -> None:
         calculate_metric_score_kwargs = {
             'y_test': y_test,
@@ -58,7 +58,7 @@ class AutoML(ABC):
                 metric,
                 **calculate_metric_score_kwargs)
 
-    # TERRIBLE METHOD.
+    # TODO: refactor.
     @final
     def _log_val_loss_alongside_fitted_model(self, losses: Dict[str, np.float64]) -> None:
         for m, l in losses.items():
@@ -170,6 +170,7 @@ class AutoGluon(AutoML):
     ) -> None:
         dataset = task.dataset
         metric = task.metric
+        timeout = task.timeout
         
         if metric not in [
             'f1',
@@ -190,7 +191,7 @@ class AutoGluon(AutoML):
             label=dataset.x.columns[-1],
             eval_metric=metric,
             verbosity=self._verbosity
-        ).fit(ag_dataset)
+        ).fit(ag_dataset, time_limit=timeout)
 
         val_scores = predictor.leaderboard().get('score_val')
         if val_scores is None or len(val_scores) == 0:
@@ -199,7 +200,7 @@ class AutoGluon(AutoML):
 
         best_model = predictor.model_best
 
-        logger.info(f"Best model found: {best_model}")
+        logger.info(f"Best model found: {best_model}.")
 
         predictor.delete_models(models_to_keep=best_model, dry_run=False)
 
@@ -222,6 +223,7 @@ class H2O(AutoML):
     ) -> None:
         dataset = task.dataset
         metric = task.metric
+        timeout = task.timeout
         
         if metric not in [
             'f1',
@@ -236,13 +238,15 @@ class H2O(AutoML):
             raise ValueError(f"Metric {metric} is not supported by H2O.")
         
         x_dtypes = dataset.x.dtypes
+        logger.debug(x_dtypes)
+
         h2o_x_dtypes = x_dtypes\
             .mask(x_dtypes == object, 'categorical')\
             .mask(x_dtypes == np.float64, 'double')\
             .to_list()
         h2o_dataset = h2o.H2OFrame(dataset.x, column_types=h2o_x_dtypes)
 
-        predictor = H2OAutoML()
+        predictor = H2OAutoML(max_runtime_secs=timeout)
         predictor.train(x=list(dataset.x.columns[:-1]), y=str(dataset.x.columns[-1]), training_frame=h2o_dataset)
 
         self._fitted_model = predictor.leader

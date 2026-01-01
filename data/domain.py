@@ -18,3 +18,4 @@ class Dataset:
 class Task:
     dataset: Dataset
     metric: str
+    timeout: int = 3600
