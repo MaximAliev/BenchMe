@@ -16,6 +16,7 @@ from autogluon.tabular import TabularDataset as AutoGluonTabularDataset, Tabular
 from autogluon.core.metrics import make_scorer
 from loguru import logger
 import jdk
+import os
 
 from data.domain import Dataset, Task
 
@@ -215,8 +216,9 @@ class H2O(AutoML):
         super().__init__(*args, **kwargs)
         self._fitted_model = None
 
-        jre_path = jdk.install('17', jre=True)
-        logger.info(jre_path)
+        if os.path.exists('/job/'):
+            jdk.install('17')
+            os.environ['JAVA_HOME'] = '/job/.jdk/jdk-17.0.17+10'
         h2o.init()
     
     @logger.catch

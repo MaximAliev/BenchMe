@@ -28,8 +28,7 @@ class BAML:
         repository = 'binary_imbalanced',
         automl = 'ag',
         validation_metric = 'f1',
-        timeout = 3600,
-        log_to_file = True,
+        timeout = None,
         test_metrics: Optional[List[str]] = None,
         *args,
         **kwargs
@@ -42,8 +41,13 @@ class BAML:
         self.automl = (automl, args, kwargs)
         self.validation_metric = validation_metric
         self._timeout = timeout
-        self._log_to_file = log_to_file
         self._test_metrics = test_metrics
+
+        self._configure_environment()
+
+    def _configure_environment(self) -> None:
+        logger.remove()
+        logger.add(sys.stdout, level='INFO')
 
     @logger.catch
     def run(self) -> None:
@@ -51,16 +55,6 @@ class BAML:
         
         for dataset in self.repository.datasets:
             self._run_on_dataset(dataset)
-
-    # def _configure_environment(self) -> None:
-        # if self._log_to_file:
-        #     log_filepath = 'logs/'
-        #     Path(log_filepath).mkdir(parents=True, exist_ok=True)
-        #     log_filepath += datetime.now().strftime(f'{self._automl} {",".join(self.validation_metric)} %Y.%m.%d %H:%M:%S')
-        #     log_filepath += '.log'
-        #     logging_handlers.append(logging.FileHandler(filename=log_filepath, encoding='utf-8', mode='w'))
-
-        # logger.add(sys.stdout, colorize=True, format='{level} {message}', level='INFO')
 
     def _run_on_dataset(self, dataset: Dataset, x_and_y = False) -> None:
         logger.info(f"Running on the dataset: Dataset(name={dataset.name}).")
