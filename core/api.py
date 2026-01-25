@@ -65,7 +65,7 @@ class Benchme:
         verbosity: int = 1,
         **kwargs
     ):
-        self._automl: AutoML
+        self._backend: AutoML
         self._validation_metric: str
         self._seed: int
         self._timeout: Optional[int]
@@ -76,7 +76,7 @@ class Benchme:
 
         self.verbosity = verbosity
         self.repository = repository
-        self.automl = (automl, kwargs)
+        self.backend = (automl, kwargs)
         self.validation_metric = metric
         self.seed = seed
         self.timeout = timeout
@@ -141,7 +141,7 @@ class Benchme:
         logger.debug(f"Train sample size < {training_dataset.size + 1}mb.")
 
         validation_metric = self.validation_metric
-        if len(class_belongings) > 2 and str(self.automl) == 'AutoGluon':
+        if len(class_belongings) > 2 and str(self.backend) == 'AutoGluon':
             validation_metric += '_weighted' 
 
         task  = Task(
@@ -152,18 +152,18 @@ class Benchme:
         )
 
         start_time = time.time()
-        self.automl.fit(task)
+        self.backend.fit(task)
 
         time_passed = time.time() - start_time
         logger.info(f"Training took {time_passed // 60} min.")
 
-        y_predicted = self.automl.predict(x_test)
+        y_predicted = self.backend.predict(x_test)
 
-        if str(self.automl) == 'H2O':
+        if str(self.backend) == 'H2O':
             validation_metric += '_weighted'
         logger.debug(f"Test metrics are {self.test_metrics}")
         
-        self.automl.score(self.test_metrics, y_test, y_predicted, pos_class_label)
+        self.backend.score(self.test_metrics, y_test, y_predicted, pos_class_label)
 
     @property
     def repository(self) -> DatasetRepository:
@@ -220,15 +220,15 @@ class Benchme:
         self._validation_metric = value
     
     @property
-    def automl(self) -> AutoML:
-        return self._automl
+    def backend(self) -> AutoML:
+        return self._backend
 
-    @automl.setter
-    def automl(self, value: Tuple[str, Dict[str, Any]]):
+    @backend.setter
+    def backend(self, value: Tuple[str, Dict[str, Any]]):
         if value[0] == 'ag':
-            self._automl = AutoGluon(**value[1])
+            self._backend = AutoGluon(**value[1])
         elif value[0] == 'h2o':
-            self._automl = H2O(**value[1])
+            self._backend = H2O(**value[1])
         else:
             raise ValueError(
                 f"""
