@@ -24,13 +24,15 @@ from core._helpers import infer_positive_target_class, train_test_split
 
 class MLBenchmark:
     """
-    User interface for performing AutoML benchmarks.
+    User interface for performing ML benchmarks.
 
-    This class presents an unified API to run different AutoML tools on various settings.
+    This class presents an unified API to run different ML methods on various settings.
+
+    Benchmarking datasets are also available.
     
     Parameters
     ----------
-    repository : str, default binary-imbalanced
+    repository : DatasetRepository, optional
         Name of the dataset repository for a benchmark.
     automl: str, default ag
         Name of the AutoML tool to run a benchmark.
@@ -40,8 +42,8 @@ class MLBenchmark:
         Also used to test performance of the leader model.
         Supported values: f1, f1_macro, f1_weighted, precision, recall, roc_auc, average_precision, balanced_accuracy,
         mcc and accuracy.
-    seed: int, optional
-        Value, used for controlling randomness during model learning.
+    random_state: int, optional
+        Value, used for controlling randomness during model training.
     timeout: int, optional
         Time budget in seconds of AutoML training on a single dataset.
     extra_metrics: list of int, optional
@@ -56,7 +58,7 @@ class MLBenchmark:
 
     def __init__(
         self,
-        repository = 'binary-imbalanced',
+        repository = None,
         automl = 'ag',
         metric = 'f1',
         random_state = 42,
@@ -170,19 +172,15 @@ class MLBenchmark:
         return self._repository
     
     @repository.setter
-    def repository(self, value: str):
-        verbosity = self.verbosity >= 2
-        if value == 'binary-imbalanced':
-            self._repository = BinaryImbalancedDatasetRepository(verbosity)
-        elif value == 'openml':
-            self._repository = OpenMLDatasetRepository()
-        else:
+    def repository(self, value: Optional[DatasetRepository]):
+        if value is None:
             raise ValueError(
                 f"""
                 Invalid value of repository parameter:{value}.
-                Options available: ['binary-imbalanced', 'openml'].
+                Options available are instances of: [BinaryImbalancedDatasetRepository, OpenMLDatasetRepository].
                 """
             )
+        self._repository = value
     
     @property
     def validation_metric(self) -> str:

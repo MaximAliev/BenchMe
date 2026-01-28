@@ -72,13 +72,12 @@ class BinaryImbalancedDatasetRepository(DatasetRepository):
         
         return self.datasets
 
-
-# REFACTOR THIS SHIT.
 class OpenMLDatasetRepository(DatasetRepository):
-    def __init__(self, suite_id=271):
+    def __init__(self, suite_id: int, verbosity=1):
         super().__init__()
         self._suite_id = suite_id
         openml.config.set_root_cache_directory("datasets/openml")
+        openml.config.set_console_log_level(verbosity)
 
     @logger.catch
     def load_dataset(self, id: int, X_and_y = False) -> Optional[Dataset]:
