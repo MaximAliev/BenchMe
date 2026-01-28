@@ -151,6 +151,7 @@ class AutoGluon(AutoML):
         predictor = AutoGluonTabularPredictor(
             label=dataset.x.columns[-1],
             eval_metric=metric,
+            learner_kwargs={ "random_state": task.random_state}
         )
 
         if timeout is not None:
@@ -248,7 +249,7 @@ class H2O(AutoML):
             .to_list()
         h2o_dataset = h2o.H2OFrame(dataset.x, column_types=self._df_dtypes)
 
-        predictor = H2OAutoML(max_runtime_secs=timeout, seed=task.seed)
+        predictor = H2OAutoML(max_runtime_secs=timeout, seed=task.random_state)
         predictor.train(x=list(dataset.x.columns[:-1]), y=str(dataset.x.columns[-1]), training_frame=h2o_dataset)
 
         self._fitted_model = predictor.leader

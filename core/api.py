@@ -59,7 +59,7 @@ class MLBenchmark:
         repository = 'binary-imbalanced',
         automl = 'ag',
         metric = 'f1',
-        seed = 42,
+        random_state = 42,
         timeout: Optional[int] = None,
         extra_metrics: Optional[List[str]] = None,
         verbosity: int = 1,
@@ -78,7 +78,7 @@ class MLBenchmark:
         self.repository = repository
         self.backend = (automl, kwargs)
         self.validation_metric = metric
-        self.seed = seed
+        self.seed = random_state
         self.timeout = timeout
         self.test_metrics = extra_metrics
 
@@ -148,7 +148,7 @@ class MLBenchmark:
             dataset=training_dataset,
             metric=validation_metric,
             timeout=self.timeout,
-            seed=self.seed
+            random_state=self.seed
         )
 
         start_time = time.time()
